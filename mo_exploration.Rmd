@@ -1,0 +1,77 @@
+---
+title: "Practicum"
+author: "Mokeli P, Nisha I, & Rachel"
+date: "February 14, 2016"
+output: html_document
+---
+
+# Loading the Dataset and converting to proper time format
+```{r}
+library(dplyr)
+library(ggplot2)
+reservations <- read.csv("3865_reservations.csv")[,c(1,3,4,5,7,8,9,10,11,12,13,14)]
+reservations$loyalty_user_id <- factor(reservations$loyalty_user_id)
+reservations$loyalty_reservation_id <-factor(reservations$loyalty_reservation_id)
+reservations$made_on <- as.POSIXct(reservations$made_on,origin="1970-01-01",z="GMT")
+reservations$reservation_date <-as.POSIXct(reservations$reservation_date,
+                                           origin="1970-01-01",z="GMT")
+
+pos <- read.csv("3865_pos.csv")[,c(2,4:8,10:17)]
+pos_items <- read.csv("pos_items.csv")
+
+```
+
+# Removing all ordinals except ordinal equal 1
+
+```{r}
+str(reservations)
+table(reservations$ordinal)
+#Keeping only ordinal equaling 1
+reservations <- subset(reservations,reservations$ordinal ==1)
+```
+
+We may have to revisit and keep the highest ordinal in order to retain code information.
+
+# Reservation Codes
+```{r}
+summary.codes <- reservations %>% 
+                 select(code) %>% 
+                 group_by(code) %>% 
+                 summarise(n=n()) %>%
+                 arrange(-n)
+```
+Summary of Reservations
+
+# Table of Loyalty User
+```{r}
+user.visits <- reservations %>% 
+               select(loyalty_user_id) %>%
+               group_by(loyalty_user_id) %>%
+               summarise(visits =n()) %>%
+               arrange(-visits)
+```
+Users 12484585 and 14324743 have over 1400 reservations. Is this in error?
+
+# Parent Venue
+```{r}
+table(reservations$parent_venue_id)
+```
+There's only 1 parent idea
+
+# Creating Bins for Party Size
+```{r}
+summary(reservations$party_size)
+ggplot(data=reservations,aes(x=party_size,fill="blue")) + geom_histogram(binwidth = 1)
+table(reservations$party_size)
+
+sizebreaks <- c(18,25,35,45,55,65,10000000000)
+sizelabels = c("18-24","25-34","35-44","45-54","55-64","65+")
+test_set <- test_set %>%
+                 mutate(age_bucket= cut(age, breaks= agebreaks, right= FALSE, labels= agelabels))
+
+```
+
+```{r}
+
+```
+
