@@ -31,6 +31,8 @@ a <- POSitems_sample %>%
   arrange(desc(n))
 
 #discount -- all 0 in this set
+str(POSitems_sample$discount)
+
 summary(POSitems_sample$discount)
 #this would sort discount descending by amount of item, in this first set all discounts 
 #re 0 so invalid.
@@ -107,6 +109,7 @@ parent_id <- POSitems_sample %>%
   arrange(desc(n))
 
 #quantity of item
+hist(POSitems_sample$quantity)
 str(POSitems_sample$quantity)
 quant_of_item <- POSitems_sample %>%
   select(itemquantity,amount)%>%
