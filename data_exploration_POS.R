@@ -1,13 +1,19 @@
 #set working directory to box folder
 setwd("~/Dropbox/GWU Data")
+options( java.parameters = "-Xmx4g" )
 library(ggplot2)
 library(dplyr)
 library(magrittr)
+library(Hmisc)
+library(caret)
+library(ff)
+library(data.table)
 options(scipen=999)
-POS <- as.data.frame(read.csv("3865_pos.csv"))
+POS <- fread("3865_pos.csv")
 #clean up data set and make sure each variable is according to metadata
 ## why would you ignore the check number? could that provide added information?
-str(POS)
+POS <- as.data.frame(POS)
+head(POS)
 POSclean <- POS[,-c(1,3,9)]
 str(POSclean)
 
@@ -74,6 +80,8 @@ counts.visit_id <- arrange(as.data.frame(count(POSclean,loyalty_visit_id)),n)
 summary(POSordinal$loyalty_reservation_id)
 counts.res <- arrange(as.data.frame(count(POSordinal,loyalty_reservation_id)),desc(n))
 
+
+
 #loyalty_user_id
 summary(POSordinal$loyalty_user_id)
 counts.user <- arrange(as.data.frame(count(POSordinal,loyalty_user_id)),desc(n))
@@ -98,6 +106,7 @@ counts.server_info <- POSordinal %>%
   select(server_id,server_name,spend) %>%
   count(server_id,server_name) %>%
   arrange(desc(n)) 
+
 #some servers do not have IDs....these also seem to be the servers with name showing up repeat times in data
 server.total_amount <- POSordinal %>% 
   select(server_id,server_name,spend) %>%
@@ -125,3 +134,12 @@ server.totalamount <- POSordinal %>%
   group_by(server_name) %>%
   summarise(total_sold = sum(spend)) %>%
   arrange(-total_sold)
+
+
+#spend
+str(POSordinal$spend)
+#avg per person
+spend.total_amount <- POSordinal %>% 
+  select(cover_count,spend) %>%
+  group_by(as.factor(cover_count)) %>%
+  summarise(total_sold = sum(spend),mean(spend),per_person = mean(spend)/4) 

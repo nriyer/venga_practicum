@@ -39,6 +39,17 @@ mean <- distinct_res %>%
         arrange(desc(cnt))
 
 #is_walkin ---non existent and important
+count_ordinal <- res %>%
+  select(ordinal, loyalty_user_id) %>%
+  count(ordinal) %>%
+  arrange(desc(n))
+
+loy_ord <- res %>%
+  select(ordinal, loyalty_user_id) %>%
+  count(loyalty_user_id) %>%
+  arrange(desc(n))
+
+count_loyalty <- summarise(loy_ord,cnt=n(),count(ordinal))
 
 #loyalty_user_id - 1.1 , look at relationship with loyalty reservation id
 str(res$loyalty_user_id)

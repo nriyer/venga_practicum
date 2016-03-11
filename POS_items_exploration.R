@@ -11,10 +11,13 @@ library(data.table)
 options(scipen=999)
 #merged all pos item csv files into one in bash
 POSitems_sample <- read.csv('3865_pos_items_2013.csv')
+POSitems_other <- fread('3988_pos_items.csv')
 POSitems <- fread('pos_items_final.csv')
 head(POSitems_sample)
 str(POSitems_sample)
 
+
+POSitems_other$item_category_name <- factor(POSitems_other$item_category_name,exclude = NULL)
 #look at each variable
 #amount - total amount (count) of each item 
 ######little confused about what this is
@@ -29,7 +32,8 @@ a <- POSitems_sample %>%
   group_by(amount_per_unit) %>%
   count(amount) %>%
   arrange(desc(n))
-
+table(POSitems_sample$item_name)
+levels(POSitems_sample$item_category_name)
 #discount -- all 0 in this set
 str(POSitems_sample$discount)
 
