@@ -1,0 +1,435 @@
+---
+title: "fact_table"
+author: "Mokeli Pelamoko"
+date: "April 10, 2016"
+output: html_document
+---
+## 1. Loading the dataset
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(data.table)  
+library(sqldf)
+library(tidyr)
+library(reshape2)
+options( java.parameters = "-Xmx4g" )
+
+reservations <- fread("3865_reservations.csv",check.names = T,
+                      header = T)
+reservations$loyalty_user_id <- factor(reservations$loyalty_user_id)
+reservations$loyalty_reservation_id <-factor(reservations$loyalty_reservation_id)
+reservations$made_on <- as.POSIXct(reservations$made_on,origin="1970-01-01",tz="GMT")
+reservations$reservation_date <-as.POSIXct(reservations$reservation_date,
+                                           origin="1970-01-01",tz="GMT")
+
+pos <- fread("3865_pos.csv",check.names = T,header=T)
+pos$created_on_utc <- as.POSIXct(pos$created_on_utc, origin="1970-01-01",tz="GMT")
+pos$modified_on_utc <- as.POSIXct(pos$modified_on_utc, origin="1970-01-01",tz="GMT")
+pos$open_date <- as.POSIXct(pos$open_date,origin = "1970-01-01", tz = "GMT")
+pos$loyalty_visit_id <- as.factor(pos$loyalty_visit_id)
+pos$loyalty_reservation_id <- as.factor(pos$loyalty_reservation_id)
+pos$loyalty_user_id <- as.factor(pos$loyalty_user_id)
+pos$server_id <- as.factor(pos$server_id)
+
+pos_items <- fread("pos_items.csv",check.names = T, header = T)
+pos_items$amount <- as.numeric(pos_items$amount)
+pos_items$amount_per_unit <- as.numeric(pos_items$amount_per_unit)
+pos_items$discount <- as.numeric(pos_items$discount)
+pos_items$quantity <- as.numeric(pos_items$quantity)
+
+pos_items$loyalty_visit_id <- as.factor(pos_items$loyalty_visit_id)
+pos_items$loyalty_reservation_id <- as.factor(pos_items$loyalty_reservation_id)
+pos_items$loyalty_visit_item_id <- as.factor(pos_items$loyalty_visit_item_id)
+
+pos_items$item_category_name <- as.factor(pos_items$item_category_name)
+pos_items$item_name <- as.factor(pos_items$item_name)
+pos_items$item_subcategory_name <- as.factor(pos_items$item_subcategory_name)
+```
+
+## Test. Testing w/ Unique Users 
+
+This section was just used to test and determine data integrity problems
+
+```{r}
+rsvp_check <- reservations %>% filter(loyalty_user_id=="3216887")   
+summary(rsvp_check$party_size)
+pos_check <- pos %>% 
+             filter(loyalty_user_id %in% 
+                      c("3216887","15940142","15944152","15968459")) %>%
+             arrange(loyalty_user_id,loyalty_reservation_id,open_date)
+summary(pos_check$spend)
+write.csv(pos_check,"pos_check.csv")
+nrow(user_check)
+# Removing duplicates from POS
+x <- pos
+duplicate_flag <- duplicated(x,by=c("discount","loyalty_reservation_id",
+                                    "loyalty_user_id", "ordinal","spend"))
+x <- x[!duplicate_flag,]
+pos_check_x <- x %>% 
+             filter(loyalty_user_id %in% 
+                      c("3216887","15940142","15944152","15968459")) %>%
+             arrange(loyalty_user_id,loyalty_reservation_id,open_date)
+testing <- sqldf("SELECT loyalty_user_id,loyalty_reservation_id,
+                         count(loyalty_reservation_id),MIN(cover_count), MAX(cover_count),
+                         SUM(discount), SUM(spend),min(ordinal),max(ordinal),
+                         max(ordinal) - min(ordinal) As diff_ordinal
+                   FROM pos
+                   WHERE loyalty_user_id NOT IN ('12484585','14324743','0') AND 
+                         loyalty_reservation_id != '0'
+                   GROUP BY loyalty_user_id,loyalty_reservation_id
+                   ORDER BY count(loyalty_user_id) DESC")
+
+```
+
+## 2. Merging Reservations with POS
+
+I merged it first, because there's  a lot of junk in POS. Thus, only keeping POS lines that match with a reservation from Open Table. Removing the any reservation with an 0 id and the two outliers. Also, there are some lines that duplicates even after merging, so I am removing any lines with same reservation id, user id, discount amount, visit id, and spend amount. 
+
+```{r}
+rsvp_pos <- merge(reservations,pos,by="loyalty_reservation_id")
+rsvp_pos$loyalty_user_id.y <- NULL
+names(rsvp_pos)[4] <- "loyalty_user_id"
+duplicates_flag <-duplicated(rsvp_pos,by=c("loyalty_reservation_id","loyalty_user_id",
+                                           "discount","loyalty_visit_id","spend"))
+rsvp_pos <- rsvp_pos[!duplicates_flag,]
+rsvp_pos <- rsvp_pos %>% 
+                filter(!loyalty_user_id %in% c('12484585','14324743','0') & 
+                        loyalty_reservation_id != '0')
+```
+
+## 3. Creating Fact Table from joined RSVP & POS
+
+Creating the lowest grain fact table. The visit id is not one-to-one with reservation id like Dan told us. There are some transactions where there are two visit id with different spend and / or discount but with the same open date and reservation number. Thus, I am summing spend and discount by loyalty user id and reservation id. The rest of the lines just create various dimensions like day of the week,etc
+```{r}
+master_fact <- rsvp_pos %>%
+            group_by(loyalty_user_id,loyalty_reservation_id) %>%
+            summarise(party_size=min(party_size),
+                      rsvp_server_name=min(server_name.x),
+                      rsvp_table=min(table_name.x),                      
+                      pos_server_name=min(server_name.y),
+                      pos_table=min(table_name.y),state=min(state),
+                      cover_count=max(cover_count),discount=sum(discount),   
+                      spend=sum(spend),made_on=min(made_on),
+                      rsvp_date=min(reservation_date),open_date=min(open_date))
+
+master_fact$elapsed_days_madeon_open <- round(with(master_fact,
+                                           difftime(open_date,made_on,
+                                                     units = "days")),4)
+master_fact$elapsed_mins_rsvp_open <-round(with(master_fact,
+                                          difftime(open_date,rsvp_date,
+                                                   units="mins")),2)
+
+master_fact$day_visit <- factor( weekdays(master_fact$open_date),
+                             levels = c("Sunday","Monday","Tuesday", "Wednesday",
+                                        "Thursday","Friday","Saturday"))
+master_fact$weekday_visit <- with(master_fact,ifelse(day_visit %in% c("Monday","Tuesday",
+                                                                "Wednesday","Thursday"), 1,0))
+master_fact$weekend_visit <- with(master_fact,ifelse(day_visit %in% c("Friday","Saturday",
+                                                                "Sunday"), 1,0))
+
+master_fact$hour_visit <- as.numeric(format(master_fact$open_date,"%H"))
+master_fact$lunch_visit <-with(master_fact,ifelse(day_visit != "Sunday" & 
+                                                    between(hour_visit,11,14),1,0))
+master_fact$dinner_visit <-with(master_fact,ifelse(between(hour_visit,17,23),1,0))
+master_fact$brunch_visit <-with(master_fact,ifelse(day_visit=="Sunday" & 
+                                                     between(hour_visit,11,14),1,0))
+rm(rsvp_pos)
+```
+
+### 4. Creating aggregates by user from RSVP & POS joined tbl
+
+```{r}
+fact_aggregates <- master_fact %>% 
+             group_by(loyalty_user_id) %>%
+             summarise(num_of_repeats = n(),
+                       min_party_size = min(party_size), 
+                       max_party_size = max(party_size),
+                       avg_party_size = mean(party_size),
+                       min_cover_count = min(cover_count), 
+                       max_cover_count = max(cover_count),
+                       avg_cover_count = mean(cover_count),
+                       min_discount = min(discount), 
+                       max_discount = max(discount),
+                       avg_discount = mean(discount),                      
+                       min_spend = min(spend), 
+                       max_spend = max(spend),
+                       avg_spend = mean(spend), 
+                       min_diffdays_madeon_open = min(elapsed_days_madeon_open), 
+                       max_diffdays_madeon_open = max(elapsed_days_madeon_open),
+                       avg_diffdays_madeon_open = mean(elapsed_days_madeon_open),
+                       min_diffmins_rsvp_open = min(elapsed_mins_rsvp_open), 
+                       max_diffmins_rsvp_open = max(elapsed_mins_rsvp_open),
+                       avg_diffmins_rsvp_open = mean(elapsed_mins_rsvp_open),
+                       avg_weekday_visits = mean(weekday_visit),
+                       avg_weekend_visits = mean(weekend_visit),
+                       avg_lunch_visits = mean(lunch_visit),
+                       avg_dinner_visits = mean(dinner_visit),
+                       avg_brunch_visits = mean(brunch_visit)
+                       )
+fact_aggregates$has.repeated <- ifelse(fact_aggregates$num_of_repeats > 1,"yes","no")
+```
+
+### 5. Creating dimensions to obtain first and last visit from RSVP & POS items
+
+```{r}
+fact_first <- master_fact %>% 
+             group_by(loyalty_user_id) %>%
+             filter(open_date == min(open_date)) %>%
+             summarise(first_party_size = party_size,
+                       first_server_name = pos_server_name,
+                       first_table = pos_table,
+                       first_discount = discount,
+                       first_spend = spend,
+                       first_visit_date = open_date,
+                       first_diffdays_madeon_visit = elapsed_days_madeon_open,
+                       first_diffmins_rsvp_open = elapsed_mins_rsvp_open,
+                       first_weekday_visits = weekday_visit,
+                       first_weekend_visits = weekend_visit,
+                       first_lunch_visits = lunch_visit,
+                       first_dinner_visits = dinner_visit,
+                       first_brunch_visits = brunch_visit )
+
+fact_last <- master_fact %>% 
+             group_by(loyalty_user_id) %>%
+             filter(open_date == max(open_date)) %>%
+             summarise(last_party_size = party_size,
+                       last_server_name = pos_server_name,
+                       last_table = pos_table,
+                       last_discount = discount,
+                       last_spend = spend,
+                       last_visit_date = open_date,
+                       last_diffdays_madeon_visit = elapsed_days_madeon_open,
+                       last_diffmins_rsvp_open = elapsed_mins_rsvp_open,
+                       last_weekday_visits = weekday_visit,
+                       last_weekend_visits = weekend_visit,
+                       last_lunch_visits = lunch_visit,
+                       last_dinner_visits = dinner_visit,
+                       last_brunch_visits = brunch_visit )
+```
+
+### 6. Creating dimensions about the server from RSVP & POS items
+```{r}
+fact_server_source <- master_fact %>% 
+                       group_by(loyalty_user_id,pos_server_name) %>%
+                       summarise(n = n()) %>%
+                       mutate(avg_same_server = mean(n),
+                              max_same_server = max(n),
+                              total_visits = sum(n))
+
+fact_server_repeats <- fact_server_source %>%
+                    select(loyalty_user_id,avg_same_server,
+                           max_same_server,total_visits) %>%
+                    distinct(loyalty_user_id,avg_same_server,
+                             max_same_server,total_visits)
+
+fact_server_counts <- fact_server_source %>%
+                      group_by(loyalty_user_id) %>%
+                      summarise(num_of_different_servers=n())
+fact_server <- merge(fact_server_counts,fact_server_repeats,by="loyalty_user_id")
+fact_server$prop_same_server = with(fact_server,max_same_server/total_visits)
+rm(fact_server_source,fact_server_repeats,fact_server_counts)
+```
+
+
+### 7. Creating dimensions about the table from RSVP & POS items
+```{r}
+fact_table_source <- master_fact %>% 
+                       group_by(loyalty_user_id,pos_table) %>%
+                       summarise(n = n()) %>%
+                       mutate(avg_same_table = mean(n),
+                              max_same_table = max(n),
+                              total_visits = sum(n))
+
+fact_table_repeats <- fact_table_source %>%
+                    select(loyalty_user_id,avg_same_table,
+                           max_same_table,total_visits) %>%
+                    distinct(loyalty_user_id,avg_same_table,
+                             max_same_table,total_visits)
+
+fact_table_counts <- fact_table_source %>%
+                      group_by(loyalty_user_id) %>%
+                      summarise(num_of_different_tables=n())
+fact_table <- merge(fact_table_counts,fact_table_repeats,by="loyalty_user_id")
+fact_table$prop_same_table = with(fact_table,max_same_table/total_visits)
+rm(fact_table_source,fact_table_repeats,fact_table_counts)
+```
+
+## 8. Combining aggregates, first, last, server, and table
+
+```{r}
+
+rsvp_pos_main <- Reduce(function(...) merge(...,by="loyalty_user_id"),
+                    list(fact_aggregates,fact_first,fact_last,fact_server,fact_table))
+
+rm(fact_aggregates,fact_first,fact_last,fact_server,fact_table)
+
+```
+
+
+## Test. Reports and testing to help aid creation of POS Items 
+
+```{r}
+total <- pos_items %>% 
+         filter(loyalty_reservation_id != "0" & item_category_name != "Condiments" &
+                item_subcategory_name != "Condiments" ) %>% 
+         select(quantity) 
+total <- sum(total$quantity,na.rm=T)
+
+popular_item <- pos_items %>% 
+               filter(loyalty_reservation_id != "0" & item_category_name != "Condiments" &
+                      item_subcategory_name != "Condiments" ) %>%
+               group_by(item_category_name,item_subcategory_name,item_name) %>%
+               summarise(percent=round((sum(quantity)/total)*100,2),n=sum(quantity)) %>%
+               arrange(-n) 
+
+x <- reservations %>% filter(loyalty_user_id == "3216887")
+y <- pos %>% filter(loyalty_user_id == "3216887")
+table(as.character(x$code))
+table(as.character(x$state))
+
+x2 <- master_fact %>% filter(loyalty_user_id == "3216887")
+table(as.character(x2$code))
+table(as.character(x2$state))
+
+b <- 10794234
+rm(total,popular_item,x,y,x2,b)
+
+```
+
+## 9. Creating POS Items Dimensions
+
+```{r}
+
+items_cat_source <- pos_items %>% 
+                 filter(loyalty_reservation_id != "0" & item_category_name != 
+                          "item_category_name") %>%
+                 group_by(loyalty_reservation_id,
+                          item_category_name) %>%
+                 summarise(amount = sum(amount),
+                           qty = sum(quantity)) 
+
+items_cat_amt1 <- items_cat_source %>%
+                 group_by(loyalty_reservation_id) %>% 
+                 select(-qty) %>%
+                 spread(item_category_name,amount) %>%
+                 select(-Misc,-Condiments)
+names(items_cat_amt1)[5] <- "Liquor_Beer"
+names(items_cat_amt1)[6] <- "Reserve_Wine"
+
+items_cat_amt2 <- items_cat_amt1 %>%
+                  mutate(Beverage_amt = ifelse(is.na(Beverage),0,Beverage),
+                        Events_amt = ifelse(is.na(Events),0,Events),
+                        Food_amt = ifelse(is.na(Food),0,Food),
+                        Liquor_Beer_amt = ifelse(is.na(Liquor_Beer),0,Liquor_Beer),
+                        Reserve_Wine_amt = ifelse(is.na(Reserve_Wine),0,Reserve_Wine),
+                        Retail_amt = ifelse(is.na(Retail),0,Retail),
+                        Wine_amt = ifelse(is.na(Wine),0,Wine)) %>%
+                  mutate(Wine_amt = Reserve_Wine_amt + Wine_amt) %>%
+                  select(-Reserve_Wine,-Reserve_Wine_amt,-Beverage,-Food,-Events,-Liquor_Beer,-Retail,-Wine)
+rm(items_cat_amt1)                        
+
+items_cat_qty1 <- items_cat_source %>%
+                 group_by(loyalty_reservation_id) %>% 
+                 select(-amount) %>%
+                 spread(item_category_name,qty) %>%
+                 select(-Misc,-Condiments)
+names(items_cat_qty1)[5] <- "Liquor_Beer"
+names(items_cat_qty1)[6] <- "Reserve_Wine"
+
+items_cat_qty2 <- items_cat_qty1 %>%
+                  mutate(Beverage_qty = ifelse(is.na(Beverage),0,Beverage),
+                        Events_qty = ifelse(is.na(Events),0,Events),
+                        Food_qty = ifelse(is.na(Food),0,Food),
+                        Liquor_Beer_qty = ifelse(is.na(Liquor_Beer),0,Liquor_Beer),
+                        Reserve_Wine_qty = ifelse(is.na(Reserve_Wine),0,Reserve_Wine),
+                        Retail_qty = ifelse(is.na(Retail),0,Retail),
+                        Wine_qty = ifelse(is.na(Wine),0,Wine)) %>%
+                  mutate(Wine_qty = Reserve_Wine_qty + Wine_qty) %>%
+                  select(-Reserve_Wine,-Reserve_Wine_qty,-Beverage,-Food,-Events,
+                         -Liquor_Beer,-Retail,-Wine)
+rm(items_cat_qty1) 
+
+items_cat <- merge(items_cat_amt2,items_cat_qty2,by="loyalty_reservation_id")
+rm(items_cat_qty2,items_cat_amt2,items_cat_source)
+
+```
+
+## 10. Creating dimension for popular foods from POS Items
+
+```{r}
+ttl_food <- pos_items %>% 
+         filter(loyalty_reservation_id != "0" & item_category_name == "Food" &
+                item_subcategory_name != "Condiments") %>% 
+         select(quantity) 
+ttl_food <- sum(ttl_food$quantity,na.rm=T)
+
+top_food <- pos_items %>% 
+               filter(loyalty_reservation_id != "0" & item_category_name == "Food" &
+                item_subcategory_name != "Condiments" ) %>%
+               group_by(item_category_name,item_subcategory_name,item_name) %>%
+               summarise(percent=round((sum(quantity)/ttl_food)*100,2),n=sum(quantity)) %>%
+               top_n(n=1,wt=n) 
+top_food_list <- c(as.character(top_food$item_name))
+
+has_top_food <- pos_items %>%
+       filter(loyalty_reservation_id != "0" & item_category_name != "item_category_name" &
+                item_name %in% top_food_list) %>%
+       group_by(loyalty_reservation_id,
+                item_name) %>%
+       summarise(qty = sum(quantity)) %>%
+       spread(item_name,qty)
+
+rm(ttl_food,top_food,top_food_list)
+
+```
+
+## 11. Combining Popolular foods and PoS dimensions and creating Aggregates, first, and last
+
+Creating top foods column then merging with master_fact to obtain the loyalty user ids
+Using setnames because some columns have spaces. Finally, converting all NAs to 0  in order to aggregate properly
+```{r}
+
+items_sub  <- merge(items_cat,has_top_food,by="loyalty_reservation_id",
+                     all.x=TRUE,all.y=FALSE)
+setnames(items_sub, make.names(colnames(items_sub)))
+items_sub[is.na(items_sub)] <-0
+
+rm(items_cat,has_top_food)
+
+items_source <-merge(select(master_fact,loyalty_user_id,open_date,
+                          loyalty_reservation_id),items_sub,
+                   by="loyalty_reservation_id")
+items_aggregates <- items_source %>%
+                   group_by(loyalty_user_id) %>%
+                   summarise_each(funs(mean(.,na.rm=TRUE)),3:ncol(items_main))
+names(items_aggregates)[-1] <- paste0("avg_",names(items_aggregates)[-1])
+
+items_first  <- items_source %>%
+                group_by(loyalty_user_id) %>%
+                filter(open_date == min(open_date)) %>%
+                select(- loyalty_reservation_id, - open_date)
+names(items_first)[-1] <- paste0("first_",names(items_first)[-1])
+
+items_last  <- items_main %>%
+                group_by(loyalty_user_id) %>%
+                filter(open_date == max(open_date)) %>%
+                select(- loyalty_reservation_id, - open_date)
+names(items_last)[-1] <- paste0("last_",names(items_last)[-1])
+
+items_main <- Reduce(function(...) merge(...,by="loyalty_user_id"),
+                    list(items_aggregates,items_first,items_last))
+
+rm(items_sub,items_source,master_fact,items_aggregates,items_first,items_last)
+
+```
+
+## 12. Combining POS Items with reservation and pos talbe
+
+```{r}
+
+fact_table <- merge(rsvp_pos_main,items_main,by="loyalty_user_id")
+
+```
+
+
