@@ -1,0 +1,15 @@
+setwd("~/Google Drive/MSBA Practicum 2016/Datasets/")
+library(dplyr)
+library(ggplot2)
+library(data.table)  
+library(tidyr)
+library(reshape2)
+library(MASS)
+library(caret)
+library(randomForest)
+options(scipen = 999)
+options( java.parameters = "-Xmx4g" )
+
+data <- fread("fact_table.csv",header = T,check.names = T)
+dim(data)
+#target variables: has repeated, num of repeats
