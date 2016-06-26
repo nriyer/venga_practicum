@@ -48,6 +48,49 @@ firstnumeric.rownames <- data.frame(rows = row.names(firsttime.numeric),loyalty_
 
 #will first cluster all the data together, then repeat guests vs. non repeat
 
+# Define functions used-------------------------------
+#function for scaling
+scale <- function(df){
+  pre_range <- preProcess(df,method = c('center','scale'))
+  processed <- predict(pre_range,df)
+  return(data.frame(processed))
+}
+
+#graphs for within and between sum of squares
+wss_and_bss <- function(df){
+  #within sum of squares
+  wss <- (nrow(df)-1)*sum(apply(df,2,var))
+  for (i in 1:12) wss[i] <- sum(kmeans(df, 
+                                       centers=i)$withinss)
+  print(plot(1:12, wss, type="b", xlab="Number of Clusters",
+             ylab="Within groups sum of squares"))
+  
+  #between sum of squares
+  bss <- (nrow(df)-1)*sum(apply(df,2,var))
+  for (i in 1:12) bss[i] <- sum(kmeans(df, 
+                                       centers=i)$betweenss)
+  print(plot(1:12, bss, type="b", xlab="Number of Clusters",
+             ylab="Between groups sum of squares"))
+}
+
+#function will return the number of clusters (n) with loyalty user id for each cluster
+#user is the scaled data frame, n is number of clusters, rows is the rownames+loyalty id to merge back
+
+kmeans.venga <- function(user,n,rows){
+  fit <- kmeans(user,n)
+  #get cluster means:this illustrates amount of each characteristic in each cluster
+  aggregate <- aggregate(user,by=list(fit$cluster), FUN=mean)
+  #append cluster assignment
+  cluster_assignment <- data.frame(rows = row.names(user),user, cluster_number = fit$cluster)
+  #merge in loyalty user id; this gives us the user id by cluster that we can then merge into main data set
+  cluster_assignment.user <- merge(cluster_assignment,rows,by = 'rows')
+  wss <- fit$withinss
+  bss <- fit$betweenss
+  list <- list(cluster_assignment.user,wss,bss,fit)
+  return(list)
+}
+
+
 #1. All users : using user.numeric data set. --------------------------------------------------
 
 #lot of variables, remove near zero variance and redundant (high collineariy vars), no NAs
@@ -68,13 +111,6 @@ user.numeric.clean <- user.numeric[,-which(colnames(user.numeric) %in% highlyCor
 
 #scale the set; i will use user.numeric and user.numeric.clean (with highly correlated columns taken out)
 
-#function for scaling
-scale <- function(df){
-  pre_range <- preProcess(df,method = c('center','scale'))
-  processed <- predict(pre_range,df)
-  return(data.frame(processed))
-}
-
 #user.numeric - clustering
 scaled.user.numeric <- scale(user.numeric)
 
@@ -83,42 +119,9 @@ scaled.user.numeric <- scale(user.numeric)
 #function for plots
 dev.off()
 
-wss_and_bss <- function(df){
-  #within sum of squares
-  wss <- (nrow(df)-1)*sum(apply(df,2,var))
-  for (i in 1:12) wss[i] <- sum(kmeans(df, 
-                                       centers=i)$withinss)
-  print(plot(1:12, wss, type="b", xlab="Number of Clusters",
-             ylab="Within groups sum of squares"))
-  
-  #between sum of squares
-  bss <- (nrow(df)-1)*sum(apply(df,2,var))
-  for (i in 1:12) bss[i] <- sum(kmeans(df, 
-                                       centers=i)$betweenss)
-  print(plot(1:12, bss, type="b", xlab="Number of Clusters",
-             ylab="Between groups sum of squares"))
-}
-
 wss_and_bss(scaled.user.numeric)
 #maybe 6, but optimal looks like 10
 
-
-#function will return the number of clusters (n) with loyalty user id for each cluster
-#user is the scaled data frame, n is number of clusters, rows is the rownames+loyalty id to merge back
-
-kmeans.venga <- function(user,n,rows){
-  fit <- kmeans(user,n)
-  #get cluster means:this illustrates amount of each characteristic in each cluster
-  aggregate <- aggregate(user,by=list(fit$cluster), FUN=mean)
-  #append cluster assignment
-  cluster_assignment <- data.frame(rows = row.names(user),user, cluster_number = fit$cluster)
-  #merge in loyalty user id; this gives us the user id by cluster that we can then merge into main data set
-  cluster_assignment.user <- merge(cluster_assignment,rows,by = 'rows')
-  wss <- fit$withinss
-  bss <- fit$betweenss
-  list <- list(cluster_assignment.user,wss,bss,fit)
-  return(list)
-}
 
 user.numeric.cluster <- kmeans.venga(scaled.user.numeric,6,numeric.rownames)
 names <- c("user.cluster","user.wss","user.bss","user.fit")
@@ -157,7 +160,7 @@ table(userclean.cluster$cluster_number)
 
 
 
-#2. first time users ----------------------------------------------
+#2. First time users ----------------------------------------------
 
 set.seed(1234)
 nzv <- nearZeroVar(firsttime.numeric)
@@ -202,7 +205,7 @@ six <- firstuser.final %>% filter(cluster_number == 6)
 four <- firstuser.final %>% filter(cluster_number == 4)
 
 
-#repeat users ----------------------------
+#3. Repeat users ----------------------------
 
 set.seed(1234)
 nzv <- nearZeroVar(repeat.numeric)
@@ -242,9 +245,12 @@ table(repeat.cluster$cluster_number)
 repeat.final <- repeat.cluster %>% select(cluster_number,loyalty_user_id) 
 repeat.final <- merge(user,repeat.final,by = 'loyalty_user_id')
 
-#4.final analysis, on user,first and repeat final tables---------------------------
+#4.Final analysis, on user,first and repeat final tables---------------------------
 
+#only keep the final analysis tables
 rm(list= ls()[!(ls() %in% c('repeat.final','firstuser.final','user','user.final'))]) 
+
+
 
 
 
