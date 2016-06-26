@@ -157,3 +157,12 @@ pred.forest.roc <- prediction(pred.forest[,2],test.rf$has.repeated)
 pred.forest.performance <- performance(pred.forest.roc,"tpr","fpr")
 plot(pred.forest.performance, col=3)
 performance(pred.forest.roc,"auc")@y.values[[1]] #AUC
+
+##??? what is happening...i am removing the highly correlated variables
+train.rf1 <- train.rf[,-which(colnames(train.rf) %in% highlyCorCol)]
+test.rf1 <- test.rf[,-which(colnames(test.rf) %in% highlyCorCol)]
+same_colnames(train.rf1,test.rf1)
+rf1 <- randomForest(has.repeated ~ ., data = train.rf1,importance=TRUE,ntree=100)
+rf1$confusion
+predictions1 <- as.data.frame(predict(rf1,test.rf1,type="response"))
+table(predictions1)
