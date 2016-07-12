@@ -1,0 +1,650 @@
+---
+title: "Segmentation_3865"
+author: "Mokeli Pelamoko"
+date: "June 23, 2016"
+output:
+  pdf_document:
+    fig_height: 6
+    fig_width: 8
+  html_document: default
+---
+## 1. About the Project 
+### 1.1 About the Dataset
+
+Segmentation for restaurant 3865. Insights are derived from the summary of each visit by merging POS, POS Item, and Reservation by loyalty reservation id number. The POS Item was summarized by loyalty reservation before the merging with POS and Reservation. In many of the visualizations, I removed the top 5% of feature in order to reduce the noise from outliers. 
+
+### 1.2 Loading Packages
+
+```{r, echo=FALSE,warning=F,message=FALSE}
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+library(reshape2)
+library(ggrepel)
+```
+
+### 1.2 Loading Dataset
+
+```{r, echo=FALSE,warning=F,message=FALSE}
+setwd("~/Desktop/practicum/venga_practicum")
+rsvp_view <- read.csv("rspv_view_3865.csv")
+rsvp_view$loyalty_user_id <- factor(rsvp_view$loyalty_user_id)
+rsvp_view$loyalty_reservation_id <- factor(rsvp_view$loyalty_reservation_id)
+rsvp_view$pos_table <- factor(rsvp_view$pos_table)
+
+rsvp_view$day_visit  <- factor(rsvp_view$day_visit,
+                                           levels = c("Monday","Tuesday", 
+                                                      "Wednesday","Thursday",
+                                                      "Friday", "Saturday","Sunday"))
+rsvp_view$time_of_week <- factor(with(rsvp_view,ifelse(weekday_visit==1,"Weekday","Weekend")))
+rsvp_view$time_of_day <- factor(with(rsvp_view,ifelse(brunch_visit==1,"Brunch",
+                                             ifelse(dinner_visit==1,"Dinner","Lunch"))))
+
+rsvp_view$discount_flag <- factor(with(rsvp_view,ifelse(discount != 0,"Yes","No")))
+rsvp_view$discount_per <- with(rsvp_view,ifelse(spend ==0,0,discount * -1/spend))
+
+rsvp_view$holiday <- factor(with(rsvp_view,ifelse(christmas_flag ==1,"Christmas",
+                            ifelse(newyears_flag ==1,"NewYears",
+                                   ifelse(valentine_flag == 1, "ValentineDay",
+                                      ifelse(mother_day_flag==1,"MothersDay","NotHoliday"))))))
+
+rsvp_view <- mutate(rsvp_view,
+                    weekday_visit=NULL, weekend_visit=NULL, breakfast_visit=NULL,
+                    open_date = NULL,christmas_flag = NULL,newyears_flag = NULL, 
+                    valentine_flag = NULL,mother_day_flag = NULL,
+                    lunch_visit=NULL,brunch_visit=NULL,dinner_visit=NULL)
+
+#flipping the sign on discount because it's negative
+rsvp_view$discount <- -1*rsvp_view$discount
+#user_view <- read.csv("user_view_3865.csv")
+```
+
+### 1.3 Total Transactions
+
+```{r, echo=FALSE,warning=F,message=FALSE}
+ttl_rsvp <- group_by(rsvp_view,has.repeated) %>%
+            summarise(n=n(),ttl_spend=sum(spend)) %>% 
+            mutate(per_trx=round(100*n/sum(n),2),
+                   per_spend=round(100*ttl_spend/sum(ttl_spend),2))
+  
+p1 <- ggplot(data=ttl_rsvp,aes(x=has.repeated,y=n)) + 
+        geom_bar(stat="identity",fill="steelblue",width=0.75) +
+        geom_text(aes(label=sprintf("%s Transactions\n%s%%",
+                                    prettyNum(n,big.mark = ","),
+                                    prettyNum(per_trx)),vjust=1.25),color="white") +
+        scale_x_discrete(labels = c("Non-Repeat Guest","Repeat Guest")) + 
+        xlab("") + ylab("Count") + ggtitle("Total Transactions")
+
+p2 <- ggplot(data=ttl_rsvp,aes(x=has.repeated,y=ttl_spend)) + 
+        geom_bar(stat="identity",fill="orange",width=0.75) +
+        geom_text(aes(label=sprintf("%s Dollars\n%s%%",
+                                    prettyNum(ttl_spend,big.mark = ","),
+                                    prettyNum(per_spend)),vjust=1.25),color="white") +
+        scale_x_discrete(labels = c("Non-Repeat Guest","Repeat Guest")) + 
+        xlab("") + ylab("Dollars") + ggtitle("Total Revenue")
+
+grid.arrange(p1,p2)
+rm(ttl_rsvp)
+```
+
+Repeat guest account for about 30% of the transactions yet only 24% of the revenue. Why do they spend less? 
+
+### 1.4 Visit Time vs Guest Retention
+
+Holidays are defined as:
+
+- Christmas 24th, 25th, and 26th
+- Mother's Day 2nd Saturday and Sunday in May
+- New Year's December 31st and January 1st 
+
+
+```{r, echo=FALSE,warning=F,message=FALSE}
+
+# Day of the Week
+p1 <- ggplot(data=rsvp_view,  aes(x=day_visit,fill=has.repeated)) +
+        geom_bar(position="fill") + ylab("ratio")+ xlab("") +
+        ggtitle("Do repeat/non-repeat guest favor a particular day?") +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+        
+p2 <- ggplot(data=rsvp_view,  aes(x=day_visit,fill=has.repeated)) +
+        geom_bar(stat="count") +xlab("") +
+        ggtitle("What's total count repeat/non-repeat by day?") +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+grid.arrange(p1,p2)
+
+# Time of the Week
+p1 <- ggplot(data=rsvp_view,  aes(x=time_of_week,fill=has.repeated)) +
+        geom_bar(position="fill") + ylab("ratio")+xlab("") +
+        ggtitle("Do repeat/non-repeat guest prefer the weekend or weekday?") +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+        
+p2 <- ggplot(data=rsvp_view,  aes(x=time_of_week,fill=has.repeated)) +
+        geom_bar(stat="count") +xlab("") +
+        ggtitle("What's total count repeat/non-repeat by weekend/weekday?") +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+grid.arrange(p1,p2)
+
+# Time of the Day
+p1 <- ggplot(data=rsvp_view,  aes(x=time_of_day,fill=has.repeated)) +
+        geom_bar(position="fill") + ylab("ratio")+xlab("") +
+        ggtitle("Do repeat/non-repeat guest prefer brunch, lunch, or dinner?") +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+        
+p2 <- ggplot(data=rsvp_view,  aes(x=time_of_day,fill=has.repeated)) +
+        geom_bar(stat="count") +xlab("") +
+        ggtitle("What's total count repeat/non-repeat by brunch/lunch/dinner?") +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+
+grid.arrange(p1,p2)
+
+# Happy Hour
+p1 <- ggplot(data=rsvp_view,  aes(x=factor(happy_hour_visit),fill=has.repeated)) +
+        geom_bar(position="fill") + ylab("ratio")+xlab("") +
+        ggtitle("What % of repeat/non-repeat attend Happy Hour?") +
+        scale_x_discrete(labels=c("Non-Happy Hour","Happy Hour")) +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+        
+p2 <- ggplot(data=rsvp_view,  aes(x=factor(happy_hour_visit),fill=has.repeated)) +
+        geom_bar(stat="count") +xlab("")+ 
+        ggtitle("What's total count repeat/non-repeat by Happy Hour?")+
+        scale_x_discrete(labels=c("Non-Happy Hour","Happy Hour")) +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+
+grid.arrange(p1,p2)
+
+# Holidays
+p1 <- ggplot(data=subset(rsvp_view,holiday !="NotHoliday"), 
+             aes(x=holiday,fill=has.repeated)) +
+        geom_bar(position="fill") + ylab("ratio")+xlab("")+ 
+        ggtitle("What % of repeat/non-repeat visit on Holidays?") +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+        
+p2 <- ggplot(data=subset(rsvp_view,holiday !="NotHoliday"),
+             aes(x=holiday,fill=has.repeated)) +
+        geom_bar(stat="count") +xlab("")+ 
+        ggtitle("What's total count repeat/non-repeat by Holidays?") +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+grid.arrange(p1,p2)
+
+# Special Occasion
+p1 <- ggplot(data=subset(rsvp_view,code !="Other"), 
+             aes(x=code,fill=has.repeated)) +
+        geom_bar(position="fill") + ylab("ratio")+xlab("")+ 
+        ggtitle("What % of repeat/non-repeat visit for special occasions?") +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+        
+p2 <- ggplot(data=subset(rsvp_view,code !="Other"),
+             aes(x=code,fill=has.repeated)) +
+        geom_bar(stat="count") +xlab("")+ 
+        ggtitle("What's total count repeat/non-repeat by special occasions?") +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+grid.arrange(p1,p2)
+
+```
+
+Repeat guest have a preference for weekdays and lunch. 
+
+### 1.5 Discount
+
+```{r, echo=FALSE,warning=F,message=FALSE}
+discount_yes <- subset(rsvp_view, discount_flag=="Yes")
+ggplot(data=discount_yes,
+        aes(y=discount,x=has.repeated)) +
+        geom_boxplot() + ylab("Discount Amount") + xlab("")+
+        ggtitle("For guests given discounts, how much discount is given? (Removed Top 5%)") +
+        scale_x_discrete(labels=c("Non-Repeat Guest","Repeat Guest")) +
+        scale_y_continuous(limits= c(0,quantile(discount_yes$discount,0.95)),
+                           breaks=seq(0,max(discount_yes$discount),by=5)) +
+        stat_summary(fun.y=mean, color="darkred", geom="point", size=3) +
+        stat_summary(fun.y=mean, color="red", geom="text",vjust=-0.7, 
+                     aes( label=round(..y.., digits=2)))
+
+ggplot(data=subset(rsvp_view, discount_per >0 & discount_per <=1), 
+        aes(y=discount_per,x=has.repeated)) +
+        geom_boxplot() + ylab("Ratio Discount/Spend") + xlab("")+
+        ggtitle("For guests given discounts, are repeat visitors given a greater discount 
+                relative to the amount spent per visit?") +
+        scale_y_continuous(breaks=seq(0,1,0.05)) +
+        stat_summary(fun.y=mean, color="darkred", geom="point", size=3) +
+        stat_summary(fun.y=mean, color="red", geom="text",vjust=-0.7, 
+                     aes( label=round(..y.., digits=2))) +
+        scale_x_discrete(labels=c("Non-Repeat Guest","Repeat Guest")) 
+
+p1 <- ggplot(data=rsvp_view,aes(x=discount_flag,fill=has.repeated)) +
+        geom_bar(position="fill") + ylab("ratio")+xlab("")+
+        ggtitle("Are repeat guests given more discounts than 1st time visitors?") +
+        scale_x_discrete(labels=c("No Discount","Discount")) +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+
+discount_stats <- group_by(rsvp_view,has.repeated,discount_flag) %>%
+                  summarise(n=n())
+        
+p2 <- ggplot(data=discount_stats,aes(x=discount_flag,y=n,fill=has.repeated)) +
+        geom_bar(stat="identity",position = "dodge") +xlab("")+
+        ggtitle("What's the count of discount given by repeat/non-repeat guest?") +
+        scale_x_discrete(labels=c("No Discount","Discount"))+ 
+        geom_text_repel(aes(label=prettyNum(n,big.mark = ",")),nudge_x=.05,nudge_y = 0.5,
+                        color="black") +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+grid.arrange(p1,p2)
+
+ggplot(data=rsvp_view, aes(y=discount,x=which_visit,color=has.repeated)) +
+        geom_point() + ylab("Discount $")+ xlab("Visit Number")+
+        ggtitle("Does Discount Increase w/ Number of Visits?") +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+
+discount_spend_zero <- subset(rsvp_view,spend==0) %>%
+                        group_by(has.repeated) %>%
+                        summarise(zero_spend_cnt=n(),zero_discount_amt=sum(discount))
+ttl_discounts <- subset(rsvp_view,discount_flag=="Yes") %>%
+                  group_by(has.repeated) %>%
+                  summarise(cnt_discounts=n(),ttl_discount_amt=sum(discount))
+
+zero_summary <- merge(discount_spend_zero,ttl_discounts,by="has.repeated") %>%
+                  mutate(per_trx=round(100*zero_spend_cnt/cnt_discounts,2),
+                         per_amt=round(100*zero_discount_amt/ttl_discount_amt,2))
+melt_zero = melt(select(zero_summary,per_trx,per_amt))
+melt_zero$has.repeated <- zero_summary$has.repeated
+
+ggplot(data=melt_zero,aes(x=has.repeated,y=value,fill=variable)) + 
+        geom_bar(stat="identity",position="dodge",width=0.75) +
+        geom_text(aes(label=sprintf("%s%%",prettyNum(value)),vjust=0),
+                  color="black") +
+        scale_x_discrete(labels = c("Non-Repeat Guest","Repeat Guest")) + 
+        xlab("") + ylab("Percent") + 
+        ggtitle("Discounts given when the Table Spend is 0 account for what % of \ndiscount transactions and % of total discount $?") + 
+        scale_fill_discrete(name="",labels=c("% of Discount Transactions", "% of Discount $"))
+
+rm(discount_stats,discount_spend_zero,zero_summary,melt_zero,discount_yes,ttl_discounts)
+```
+
+Both repeat and non-repeat guests are equally given discounts, but repeat guests are discounted at higher dollar amounts and higher percentage relative to their visit spend amount. 6% and 10% of all discount transactions for both groups are given even though the total visit spend amount was 0. Why is that? Is this how the POS system handles voids? Are these employee meals? These discounts account for about 13% and 30% of discount spending for non-repeat and repeat guest, respectively 
+
+### 1.6 Spend per Visit
+
+```{r, echo=FALSE,warning=F,message=FALSE}
+
+ggplot(data=subset(rsvp_view, spend >0), 
+       aes(x=day_visit,y=spend,color=has.repeated)) +
+        geom_boxplot() + ylab("Spend per Visit")+ xlab("")+
+        ggtitle("What's the spend by day and repeat/non-repeat 
+                visitors (Removed Top 5%)?") + 
+        scale_y_continuous(limits = c(0,quantile(rsvp_view$spend,0.95)),
+                           breaks = seq(0,max(rsvp_view$spend),10)) +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+
+ggplot(data=subset(rsvp_view, spend > 0), aes(x=time_of_day,y=spend,color=has.repeated)) +
+        geom_boxplot() + ylab("Spend per Visit")+ xlab("")+
+        ggtitle("What's the spend by time of day and repeat/non-repeat 
+                visitors (Removed Top 5%)?") + 
+        scale_y_continuous(limits = c(0,quantile(rsvp_view$spend,0.95)),
+                           breaks = seq(0,max(rsvp_view$spend),10)) +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+
+ggplot(data=subset(rsvp_view, spend > 0 ),
+       aes(x=factor(happy_hour_visit),y=spend,color=has.repeated)) +
+        geom_boxplot() + ylab("Spend per Visit")+ xlab("")+
+        ggtitle("What's the spend by Happy Hour and 
+                repeat/non-repeat visitors (Removed Top 5%)?") + 
+        scale_y_continuous(limits = c(0,quantile(rsvp_view$spend,0.95)),
+                           breaks = seq(0,max(rsvp_view$spend),10)) +
+        scale_x_discrete(labels = c("Non-Happy Hour","Happy Hour")) +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+
+ggplot(data=subset(rsvp_view, spend > 0), aes(x=code,y=spend,color=has.repeated)) +
+        geom_boxplot() + ylab("Spend per Visit")+ xlab("")+
+        ggtitle("What's the spend by special occasion 
+                and repeat/non-repeat visitors (Removed Top 5%)?") + 
+        scale_y_continuous(limits = c(0,quantile(rsvp_view$spend,0.95)),
+                           breaks = seq(0,max(rsvp_view$spend),10)) +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+```
+
+Repeat guest spend less per visit than new customers. 
+
+### 1.7 Repeat Guests 
+
+```{r, echo=FALSE,warning=F,message=FALSE}
+
+cnt_repeats <- rsvp_view %>%
+                 group_by(loyalty_user_id) %>%
+                 filter(which_visit > 1) %>%
+                 ungroup() %>%
+                 mutate(bin=ifelse(which_visit <= 10,which_visit,">10")) %>%
+                 group_by(bin) %>%
+                 summarise(n=n()) %>%
+                 mutate(total = sum(n),
+                        per_trx = round((n/total)*100,2))
+
+cnt_repeats$bin <- factor(cnt_repeats$bin,
+                      levels=c("2","3","4","5","6","7","8","9","10",">10"))
+
+ggplot(data=cnt_repeats,aes(x=bin,y=per_trx)) + 
+        geom_bar(stat="identity",fill="steelblue",width=0.75) +
+        geom_text(aes(label=sprintf("%s%%\n%s",prettyNum(per_trx),
+                                    prettyNum(n)),vjust=0.5),
+                  color="black") +
+        xlab("# of Times Returned") + ylab("Percent") + 
+        ggtitle("For repeat guesst, what % of time do the guest return?")
+
+days_subset <- subset(rsvp_view,has.repeated=="yes" & which_visit > 1)
+ggplot(data=days_subset,aes(x=factor(1),y=days_bt_visits)) +
+  geom_boxplot() + ylab("Days b/t Visits") + xlab("") +
+  scale_x_discrete(labels="") +
+  scale_y_continuous(limits=c(0,quantile(days_subset$days_bt_visits,0.95)),
+                     breaks=seq(0,max(days_subset$days_bt_visits),25)) + 
+  ggtitle("For Repeat Guest, how many days elapse between visits (Removed Top 5%)?") +
+  coord_flip() 
+
+avg_spend_visit <- subset(rsvp_view, spend > 0 & spend <= quantile(spend,0.95) & 
+                            has.repeated == "yes" & which_visit <= 10) %>%
+                    group_by(which_visit) %>%
+                    summarise(avg_spend = mean(spend),
+                              sd_spend  = sd(spend),
+                              n = n())
+limits <- aes(ymax=avg_spend+sd_spend,ymin=avg_spend-sd_spend)
+ggplot(data=avg_spend_visit, aes(x=which_visit,y=avg_spend)) +
+          geom_point() + geom_line()+
+          ylab("Avg. Spend per Visit Number w/ Error Bars")+ xlab("Visit Number")+
+          ggtitle("For repeat visitors, do they spend more each 
+                  subsequent visit (Removed Top 5%)?") + 
+          scale_x_continuous(breaks = seq(0,10,1)) +
+          geom_errorbar(limits, width=0.2) +
+          scale_y_continuous(breaks = seq(0,300,20)) 
+rm(avg_spend_visit,cnt_repeats,limits,days_subset)
+
+```
+
+About 75% of the repeat guest only come for 2 or 3 visits. The median days between visits is about 70 days. Finally, on average, repeat guest tend to spend less the more they visit.
+
+### 1.8 Party Size
+
+```{r, echo=FALSE,warning=F,message=FALSE}
+
+ggplot(data=subset(rsvp_view, spend >0 & party_size <= 10), 
+      aes(x=factor(party_size),y=spend,color=has.repeated)) +
+      geom_boxplot() + ylab("Spend per Visit")+ xlab("Party Size")+
+      ggtitle("What's the spend by party size 
+              (Removed Top 5% Spend and Limited to Party <=10)?") + 
+      scale_y_continuous(limits = c(0,quantile(rsvp_view$spend,0.95)),
+                         breaks = seq(0,max(rsvp_view$spend),20))  +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+
+party_size_cnts <- rsvp_view %>%
+                    mutate(bin=ifelse(party_size >10,">10",party_size)) %>%
+                    group_by(has.repeated,bin) %>%
+                    summarise(n=n()) %>%
+                    ungroup %>%
+                    group_by(has.repeated) %>% 
+                    mutate(total=sum(n),
+                           per_ttl=round(100*n/total,2))
+party_size_cnts$bin <- factor(party_size_cnts$bin,
+                              levels=c("1","2","3","4","5","6","7","8","9","10",">10"))
+
+ggplot(data=party_size_cnts,aes(x=bin,y=per_ttl,fill=has.repeated)) +
+        geom_bar(stat="identity",position = "dodge") +
+        ggtitle("What's % visit for each party size?") + 
+        ylab("Percent") + xlab("Party Size") + 
+        geom_text_repel(aes(label=prettyNum(per_ttl)),color="black") +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+
+party_size_spend <- rsvp_view %>%
+                    mutate(bin=ifelse(party_size >10,">10",party_size)) %>%
+                    group_by(has.repeated,bin) %>%
+                    summarise(revenue=sum(spend)) %>%
+                    ungroup() %>%
+                    group_by(has.repeated) %>%
+                    mutate(ttl_revenue=sum(revenue),
+                           per_revenue=round(100*revenue/ttl_revenue,2))
+
+party_size_spend$bin <- factor(party_size_spend$bin,
+                              levels=c("1","2","3","4","5","6","7","8","9","10",">10"))
+ggplot(data=party_size_spend,aes(x=bin,y=per_revenue,fill=has.repeated)) +
+        geom_bar(stat="identity",position = "dodge") +
+        ggtitle("What's % revenue for each party size?") + 
+        ylab("Percent") + xlab("Party Size") + 
+        geom_text_repel(aes(label=prettyNum(per_revenue)),color="black") +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+
+rm(party_size_cnts)
+
+```
+
+As expected, larger parties do spend more, but again repeat guest spend less regardless of the party size. For both groups, guests tend to come in parties of 2; for repeat guest, it's about 70% of the time. Finally, large parties only account for 0.8% of all 1st guest visits, they generate about 5% of the revenue. 
+
+### 1.9 Food Category
+
+The food category were derived from the POS item category name feature.
+
+```{r, echo=FALSE,warning=F,message=FALSE}
+food_cat <- melt(rsvp_view[,c(21,23:29)])
+food_cat$has.repeated <- rsvp_view$has.repeated
+food_cat$ordered <- ifelse(food_cat$value != 0,1,0)
+cat_summary <- group_by(food_cat,variable,has.repeated) %>%
+                  summarise(ttl_trx = n(),
+                            cat_trx = sum(ordered)) %>%
+                  mutate(per_cat = round(100*cat_trx/ttl_trx,2)) %>%
+                  ungroup() %>%
+                  arrange(-per_cat)
+
+ggplot(data=subset(food_cat, value > 0 & 
+                       !(variable %in% c("Events_spend","Reserve.Wine_spend"))), 
+        aes(x=variable,y=value,color=has.repeated)) +
+        geom_boxplot() + ylab("Spend per Visit")+ xlab("")+
+        ggtitle("What's the spend by food category for repeat/non-repeat 
+                visitors (Removed Top 5% Spend & Assumes each category is ordered)?") + 
+        scale_y_continuous(limits = c(0,quantile(food_cat$value,0.95)),
+                           breaks = seq(0,max(food_cat$value),10)) +
+        scale_x_discrete(labels=c("Beverage","Food","Liquor/Beer","Misc",
+                                  "Retail","Wine"))+
+        theme(axis.text.x = element_text(angle = 30, hjust = 1)) +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+
+p1 <- ggplot(data=subset(food_cat, value > 0 & variable =="Events_spend"), 
+        aes(x=variable,y=value,color=has.repeated)) +
+        geom_boxplot() + ylab("Spend per Visit")+ xlab("")+
+        ggtitle("What's the spend by food category for repeat/non-repeat 
+                visitors (Assumes each category is ordered)?") + 
+        scale_y_continuous(breaks = seq(0,max(food_cat$value),500))  +
+        scale_x_discrete(labels=c("Events")) +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+
+p2 <- ggplot(data=subset(food_cat, value > 0 & variable=="Reserve.Wine_spend"), 
+        aes(x=variable,y=value,color=has.repeated)) +
+        geom_boxplot() + ylab("Spend per Visit")+ xlab("")+
+        ggtitle("What's the spend by food category for repeat/non-repeat 
+                visitors (Removed Top 5% Spend & Assumes each category is ordered)?") + 
+        scale_y_continuous(breaks = seq(0,max(food_cat$value),100))  +
+        scale_x_discrete(labels=c("Reserve Wine")) +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+
+grid.arrange(p1,p2)
+
+ggplot(data=cat_summary,aes(x=variable,y=per_cat,fill=has.repeated)) +
+  geom_bar(stat="identity",position = "dodge") +
+  ggtitle("What % of each visit is the food category ordered by
+          Repeat/Non-Repeat Guest?") + ylab("Percent") + xlab("") + 
+  geom_text_repel(aes(label=prettyNum(per_cat)),color="black") +
+  scale_x_discrete(labels=c("Beverage","Events", "Food","Liquor/Beer","Misc",
+                            "Reserve Wine", "Retail","Wine"))+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1)) +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+  
+rm(cat_summary,food_cat)
+
+```
+
+The same pattern held with the food categories: repeat guest spending less for the majority of the categories. The Misc category is generally comprised of cork fees. Repeat guests also are less likely to order beer, liquor, or wine on a visit; this likely because many are coming for lunch. 
+
+### 1.10 Servers 
+
+To analyze servers and tables, I removed any transactions with a party size greater than 10. Party size larger than 10 tend to be events, thus it may skewed the results. The sample size was still robust; party_size greater than 10 only accounts for 7% of the transactions. 
+
+Graph below tries to answer whether difference in percent of revenue generated by server relative to percent of transactions can be explained by the average party size for the server; negative number indicates that the server generated less percentage of revenue relative to % of visits. For example, Stephon B accounted for 9.11% of the visits yet only accounted for 7.03% of the revenue, thus he's delta is -2.08%. The assumption is that over a period of time, a server should be generate revenue equal to his/her rate of transactions. Are there servers who generate more revenue relative to their number of transactions?
+
+```{r, echo=FALSE,warning=F,message=FALSE}
+
+top_servers <- subset(rsvp_view,party_size <=10) %>%
+                mutate(temp=ifelse(discount_flag=="Yes",1,0)) %>%
+                group_by(pos_server_name) %>%
+                summarise(n=n(),revenue=sum(spend),
+                          ttl_discount=sum(discount),
+                          num_discount=sum(temp),
+                          ave_party=round(mean(party_size),2),
+                          sd_party=round(sd(party_size),2)) %>% 
+                mutate(ttl_trx=sum(n),ttl_spend=sum(revenue),
+                       ave_check = revenue/n,
+                       ave_discount=round(ttl_discount/num_discount,2)) %>%
+                arrange(-n) %>%
+                mutate(per_trx=round(100*n/ttl_trx,2)) %>%
+                arrange(-ttl_spend) %>%
+                mutate(per_revenue=round(100*revenue/ttl_spend,2),
+                       ttl_trx=NULL,ttl_spend=NULL,
+                       per_discount=round(100*num_discount/n,2),
+                       diff=per_revenue-per_trx) %>%
+                top_n(20,wt=per_trx)
+
+cnt_weekends <- subset(rsvp_view,party_size <=10 & time_of_week =="Weekend") %>%
+                group_by(pos_server_name) %>%  
+                summarise(n_weekends=n())
+
+cnt_dinner  <-  subset(rsvp_view,party_size <=10 & time_of_day =="Dinner") %>%
+                group_by(pos_server_name) %>%  
+                summarise(n_dinner=n()) 
+
+temp <- merge(cnt_weekends,cnt_dinner,by="pos_server_name") 
+ 
+top_servers <- merge(top_servers,temp,all.x = TRUE,all.y=FALSE,by="pos_server_name")
+
+top_servers <- top_servers %>%
+                mutate(per_weekends=round(100*n_weekends/n,2),
+                       per_dinner=round(100*n_dinner/n,2))
+
+server_stats <- subset(rsvp_view,pos_server_name %in% top_servers$pos_server_name &
+                         party_size <=10) %>%
+                  group_by(pos_server_name,has.repeated) %>%
+                  summarise(n=n(),revenue=sum(spend)) %>%
+                  ungroup() %>% arrange(-n)
+
+trx_revenue <- melt(select(top_servers,per_trx,per_revenue))
+trx_revenue$servers <- top_servers$pos_server_name
+ggplot(data=trx_revenue,aes(x=servers,y=value,fill=variable)) +
+  geom_bar(stat="identity",position = "dodge") +
+  scale_fill_discrete(name="",labels=c("% of Transactions", "% of Revenue")) +
+  ggtitle("For top 20 servers by transactions, how does % of transactions
+          compare to % of revenue (Removed any transactions 
+          party size > 10)?") + ylab("Percent") + xlab("") + 
+  geom_text_repel(aes(label=prettyNum(value)),color="black") +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+  
+limits <- aes(ymax=ave_party+sd_party,ymin=ave_party-sd_party)
+ggplot(data=top_servers,aes(y=ave_party,x=diff)) + 
+  geom_point() + geom_smooth(se=FALSE) + geom_errorbar(limits, width=0.2)+
+  ggtitle("Can difference of % Revenue and Visits be explained by Party Size?") + 
+  xlab("Difference % of Revenue and % of Visits")+ ylab("Ave. Party Size w/ error bars")+
+  geom_text_repel(aes(label=pos_server_name),color="black") +
+  scale_x_continuous(breaks=seq(-4,4,0.5)) +
+  scale_y_continuous(breaks=seq(0,max(top_servers$ave_party+1),1))
+```
+
+Party size cannot explain the delta between % of revenue and % of visits. Party size has some influence but not much. For example, Stephon B has -2.0 delta and Daniel R has +1.7; Stephon B servers smaller tables on average than Daniel so you would expect Daniel to generate more overall revenue. However, Sarah Horwitz servers on average the same party size as Daniel R; however, Sarah H's delta is ~ 0. 
+
+```{r, echo=FALSE,warning=F,message=FALSE}
+ggplot(data=top_servers,aes(y=per_dinner,x=diff)) + 
+  geom_point() + geom_smooth(se=FALSE)+
+  ggtitle("Can difference of % Revenue and % Visits be \nexplained by % of time server works dinner shifts?") + 
+  xlab("Difference % of Revenue and % of Visits")+ ylab("% of Dinner Visits")+
+  geom_text_repel(aes(label=pos_server_name),color="black") +
+  scale_x_continuous(breaks=seq(-4,4,0.5)) +
+  scale_y_continuous(breaks=seq(0,100,10))
+
+ggplot(data=top_servers,aes(y=per_weekends,x=diff)) + 
+  geom_point() + geom_smooth(se=FALSE)+
+  ggtitle("Can difference of % Revenue and % Visits be \nexplained by % of time server works weekends?") + 
+  xlab("Difference % of Revenue and % of Visits")+ ylab("% of Weekend Visits")+
+  geom_text_repel(aes(label=pos_server_name),color="black") +
+  scale_x_continuous(breaks=seq(-4,4,0.5)) +
+  scale_y_continuous(breaks=seq(0,100,10))
+```
+
+Time of the day and of the week do correlate with higher revenue generations. There are still some servers who are outperforming and underperforming. For example, Jennifer A doesn't work nights or weekends yet she generates more revenue than expected. On the contrary, Stephan B works strictly nights and heavily on the weekend but he's revenue generation is much lower than it should. Perphaps Stephan B is a bartender. 
+
+```{r, echo=FALSE,warning=F,message=FALSE}
+ggplot(data=subset(rsvp_view,spend > 0 & pos_server_name %in% top_servers$pos_server_name &
+                         party_size <=10), 
+        aes(x=pos_server_name,y=spend,color=has.repeated)) +
+        geom_boxplot() + ylab("Spend per Visit")+ xlab("")+
+        ggtitle("What's the spend per visit for top 20 servers?") +
+        theme(axis.text.x = element_text(angle = 30, hjust = 1)) +
+        scale_y_continuous(limits = c(0,quantile(rsvp_view$spend,0.95)),
+                           breaks = seq(0,max(rsvp_view$spend),20)) +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+
+discount_spend <- subset(rsvp_view,discount_flag=="Yes" & pos_server_name %in% top_servers$pos_server_name &
+                         party_size <=10)
+ggplot(data=discount_spend, 
+          aes(x=pos_server_name,y=discount,color=has.repeated)) +
+        geom_boxplot() + ylab("Discount per Visit")+ xlab("")+
+        ggtitle("What's the discount per visit for top 20 servers?") +
+        theme(axis.text.x = element_text(angle = 30, hjust = 1)) +
+        scale_y_continuous(limits = c(0,quantile(discount_spend$discount,0.95)),
+                           breaks = seq(0,max(discount_spend$discount),20)) +
+        scale_fill_discrete(name="",labels=c("Non-Repeat Guest", "Repeat Guest"))
+
+rm(trx_revenue,discount_spend,cnt_weekends,temp,limits,top_tables)
+```
+
+Same pattern as previously discussed: repeat guest spend less and get higher discounts regardless of the server. 
+
+
+### 1.11 Tables
+
+As with the servers, I analyzed the top 20 tables by transactions. The top 20 tables account for about 43% of the transactions; ideally you want 80/20 but there are too many tables to display graphically. 
+
+```{r,echo=FALSE,warning=F,message=FALSE}
+
+top_tables <- rsvp_view %>%
+              group_by(pos_table) %>%
+              summarise(tbl_trx=n(),tbl_revenue=sum(spend)) %>% 
+              mutate(ttl_trx=sum(tbl_trx),
+                     ttl_revenue=sum(tbl_revenue)) %>% 
+              mutate(per_trx=round(100*tbl_trx/ttl_trx,2),
+                     per_revenue=round(100*tbl_revenue/ttl_revenue,2)) %>%
+              top_n(20,wt=per_trx)
+
+tbl_bin <- subset(rsvp_view,spend > 0 & party_size <= 10) %>%
+             mutate(bin=ifelse(pos_table %in% as.character(top_tables$pos_table),
+                               as.character(pos_table),"Outside Top 20"))
+
+ggplot(data=tbl_bin, 
+        aes(x=bin,y=spend,color=has.repeated)) +
+        geom_boxplot() + ylab("Spend per Visit")+ xlab("")+
+        ggtitle("What's the spend per visit for tables?") +
+        theme(axis.text.x = element_text(angle = 30, hjust = 1)) +
+        scale_y_continuous(limits = c(0,quantile(rsvp_view$spend,0.95)),
+                           breaks = seq(0,max(rsvp_view$spend),10)) 
+per_trx <- tbl_bin %>%
+           group_by(has.repeated,bin) %>%
+           summarise(trx_table =n()) %>%
+           ungroup() %>%
+           group_by(has.repeated) %>%
+           mutate(ttl_trx = sum(trx_table),
+                  per_trx = round(100*trx_table/ttl_trx,2))
+
+ggplot(data=per_trx,aes(x=bin,y=per_trx,fill=has.repeated)) +
+  geom_bar(stat="identity",position = "dodge") +
+  ggtitle("Table accounts for what % of transactions?") + 
+  ylab("Percent") + xlab("") + 
+  geom_text_repel(aes(label=prettyNum(per_trx)),color="black") +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1)) +
+  coord_cartesian(ylim=c(0,3))
+
+
+rm(tbl_bin,per_trx,top_tables,tbl_bin)
+```
+
+The top 20 tables are used fairly at the same rate, but there are clear distinction in the spend for tables. Customers spend less on tables 131 through 233. Are these bar seating? 
+
+### 2.0 Conclusions
+
+The profile that emerges from the analysis is that this restaurant doesn't truly have repeat guest. The median days between visits for repeats is about 70 days and the majority are repeat customer only come back once or twice for likely a businesslunch where they are likely just ordering food and soft drinks. The anomaly with guest getting a discount even though the table amount is 0 should be investigated further. 

@@ -30,14 +30,14 @@ firsttime.user <- user[!firsttime.user.ind,]
 
 #sapply does not work with data.table so have to turn it into a data.frame
 users.cluster <- as.data.frame(user)
-user.numeric <- user.cluster[sapply(user.cluster,is.numeric)]
+user.numeric <- users.cluster[sapply(users.cluster,is.numeric)]
 str(user.numeric)
 
 repeat.cluster <- as.data.frame(repeat.user)
-repeat.numeric <- repeat.cluster[sapply(user.cluster,is.numeric)]
+repeat.numeric <- repeat.cluster[sapply(repeat.cluster,is.numeric)]
 
 firsttime.cluster <- as.data.frame(firsttime.user)
-firsttime.numeric <- firsttime.cluster[sapply(user.cluster,is.numeric)]
+firsttime.numeric <- firsttime.cluster[sapply(firsttime.cluster,is.numeric)]
 
 rm(users.cluster,repeat.cluster,firsttime.cluster)
 
@@ -45,8 +45,6 @@ rm(users.cluster,repeat.cluster,firsttime.cluster)
 numeric.rownames <- data.frame(rows = row.names(user.numeric),loyalty_user_id = user$loyalty_user_id)
 repeatnumeric.rownames <- data.frame(rows = row.names(repeat.numeric),loyalty_user_id = repeat.user$loyalty_user_id)
 firstnumeric.rownames <- data.frame(rows = row.names(firsttime.numeric),loyalty_user_id = firsttime.user$loyalty_user_id)
-
-#will first cluster all the data together, then repeat guests vs. non repeat
 
 # Define functions used-------------------------------
 #function for scaling
@@ -90,8 +88,10 @@ kmeans.venga <- function(user,n,rows){
   return(list)
 }
 
+# I will first cluster all the data together, then repeat guests vs. non repeat
 
 #1. All users : using user.numeric data set. --------------------------------------------------
+
 
 #lot of variables, remove near zero variance and redundant (high collineariy vars), no NAs
 
@@ -109,14 +109,15 @@ highlyCorrelated <- findCorrelation(userCor, cutoff=0.7)
 highlyCorCol <- colnames(user.numeric)[highlyCorrelated]
 user.numeric.clean <- user.numeric[,-which(colnames(user.numeric) %in% highlyCorCol)]
 
+#keep the names of the columns that were used for the clustering
+reduced.names <- names(user.numeric.clean)
+
 #scale the set; i will use user.numeric and user.numeric.clean (with highly correlated columns taken out)
 
 #user.numeric - clustering
 scaled.user.numeric <- scale(user.numeric)
 
 #wss and bss plot to see optimal number of clusters
-
-#function for plots
 dev.off()
 
 wss_and_bss(scaled.user.numeric)
@@ -140,23 +141,31 @@ table(user.cluster$cluster_number)
 
 #############DO NOT RUN, NEEDS TO BE FIXED########################
 #plot by cluster
-plotcluster(scaled.user.numeric.clean, user.fit$cluster)
-clusplot(userclean.cluster,user.fit$cluster, color = TRUE, shade = TRUE, labels = 2, lines = 0)
+#plotcluster(scaled.user.numeric.clean, user.fit$cluster)
+#clusplot(userclean.cluster,user.fit$cluster, color = TRUE, shade = TRUE, labels = 2, lines = 0)
 #only explain 38.19% variability, also a lot of variables. try and narrow down
 ###################################################################
+
+
+
+scaled.user.numeric.clean <- scale(user.numeric.clean)
 
 #using the cleaned user data with 15 variables
 wss_and_bss(scaled.user.numeric.clean)
 #7 clusters
 
-scaled.user.numeric.clean <- scale(user.numeric.clean)
 user.numeric.clean <- kmeans.venga(scaled.user.numeric.clean,7,numeric.rownames)
 names <- c("userclean.cluster","userclean.wss","userclean.bss")
 names(user.numeric.clean) <- names
 names(user.numeric.clean)
 list2env(user.numeric.clean,environment())
 
+#build final data frame with all user observations and cluster assignments for each
+user.final <- userclean.cluster %>% select(cluster_number,loyalty_user_id) 
+user.final <- merge(user,user.final,by = 'loyalty_user_id')
+
 table(userclean.cluster$cluster_number)
+
 
 
 
@@ -248,8 +257,7 @@ repeat.final <- merge(user,repeat.final,by = 'loyalty_user_id')
 #4.Final analysis, on user,first and repeat final tables---------------------------
 
 #only keep the final analysis tables
-rm(list= ls()[!(ls() %in% c('repeat.final','firstuser.final','user','user.final'))]) 
-
+rm(list= ls()[!(ls() %in% c('repeat.final','firstuser.final','user','user.final','reduced.names'))]) 
 
 
 
